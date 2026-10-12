@@ -1,0 +1,6 @@
+unboxed
+Copyright 2026 Sensat Ltd
+
+This product includes code adapted from the INSID3 reference implementation,
+licensed under the Apache License 2.0 (see src/unboxed/insid3/LICENSE and
+src/unboxed/insid3/NOTICE).

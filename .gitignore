@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.ruff_cache/
+# Local data, weights and outputs (never committed)
+lancedb/
+outputs/
+*.tif
+*.tiff
+*.pth
+*.pt

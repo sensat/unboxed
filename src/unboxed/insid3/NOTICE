@@ -1,0 +1,12 @@
+The code in this directory (models/, utils/) is adapted from the INSID3
+reference implementation (in-context segmentation with a frozen DINOv3
+encoder), distributed under the Apache License 2.0 (see LICENSE).
+
+Modifications in this repository:
+- models/insid3.py: the encoder is put in eval mode before the positional
+  debiasing basis is computed, so the basis is deterministic across processes.
+- utils/clustering.py: split_disconnected_clusters() splits each cluster into
+  its spatially connected pieces.
+
+The wrapper in unboxed/insid3/__init__.py (model loading, prototypes and
+per-tile clustering) is part of this repository.

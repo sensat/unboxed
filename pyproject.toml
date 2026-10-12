@@ -1,0 +1,66 @@
+[project]
+name = "unboxed"
+version = "0.1.0"
+description = "Stitches DINOv3 patch clusters across tile boundaries into seamless regions, so objects in large aerial imagery stay whole for text- and example-based search and segmentation."
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+authors = [{ name = "Sensat Ltd" }]
+requires-python = ">=3.12"
+dependencies = [
+    "einops",
+    "lancedb==0.29.2",
+    "numpy>=2.0.0",
+    "open-clip-torch>=3.1.0",
+    "opencv-python>=4.11.0.86",
+    "pandas>=2.0.0",
+    "Pillow",
+    "pyarrow",
+    "pycocotools",
+    "rasterio>=1.4.3",
+    "rio-cogeo>=7.0.1",
+    "scikit-learn",
+    "scipy",
+    "shapely>=2.0.0",
+    # Imported by the DINOv3 torch hub code
+    "termcolor",
+    "torchmetrics",
+    "torch==2.7.1",
+    "torchvision==0.22.1",
+    "tqdm>=4.66.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff"]
+
+[project.scripts]
+unboxed-ingest = "unboxed.ingest:cli"
+unboxed-partition = "unboxed.partition:cli"
+unboxed-naive-index = "unboxed.naive:cli"
+unboxed-skyclip = "unboxed.skyclip_index:cli"
+unboxed-query = "unboxed.query_cli:cli"
+unboxed-eval = "unboxed.eval.evaluate:cli"
+unboxed-eval-text = "unboxed.eval.evaluate_text:cli"
+unboxed-partition-quality = "unboxed.eval.partition_quality:cli"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/unboxed"]
+
+[tool.ruff]
+line-length = 88
+# Vendored INSID3 code is kept as close to upstream as possible
+extend-exclude = ["src/unboxed/insid3/models", "src/unboxed/insid3/utils"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+ignore = ["E501"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
