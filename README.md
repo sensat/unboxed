@@ -1,31 +1,10 @@
-# unboxed
+# 📦 unboxed
 
 Stitches DINOv3 patch clusters across tile boundaries into seamless regions, so objects in large aerial imagery stay whole for text- and example-based search and segmentation.
 
-Large orthophotos are usually indexed as a grid of fixed tiles, one embedding per tile. Objects get cut by the grid and diluted by whatever else shares their tile. `unboxed` indexes **regions** instead: coherent areas built from DINOv3 patch clusters that are merged across tile boundaries, each small enough to segment in one crop. A naive tile index is included as a baseline.
+Large orthophotos are usually indexed as a grid of fixed tiles, one embedding per tile. Objects get cut by the grid and diluted by whatever else shares their tile. `unboxed` indexes **regions** instead: DINOv3 patch clusters merged across tile boundaries into coherent areas, each small enough to segment in one crop. Each region is stored with a DINOv3 vector for example-based search and a SkyCLIP vector for text search, in one table. Retrieved regions are segmented with the training-free INSID3 in-context head. A naive tile index is included as a baseline.
 
-## How it works
-
-**Ingest (per 448 px tile, native resolution)**
-1. DINOv3 ViT-L/16 features for every 16 px patch (28 × 28 per tile), L2-normalised and positionally debiased (INSID3).
-2. Agglomerative clustering of the patches (cosine, τ = 0.6); mostly-nodata patches are excluded.
-3. Each cluster is split into spatially connected **pieces**, each embedded as the mean of its patches.
-
-**Partition (across tiles)**
-
-4. Pieces are merged across tile boundaries into **regions** by greedy Ward agglomeration on the piece adjacency graph, minimising `within-region variance + region_cost × #regions`, with every region at most 448 px across. A boundary-refinement pass then moves single pieces between neighbouring regions when that lowers the objective.
-
-**Index**
-
-5. One row per region: its polygon, a DINOv3 vector (size-weighted mean of its pieces) and, optionally, a SkyCLIP vector (a context crop of at least 224 px around the region). Both vectors live in the same table.
-
-**Query**
-
-6. Text queries search the SkyCLIP vectors; example queries (reference polygons) search the DINOv3 vectors. Retrieval always ranks the atomic regions.
-7. **Query merge** (segmentation step): each hit that scores in the top 5% of the index for the query grows into its connected neighbours that also score in the top 5%. Regions need only be similar *for this query*, not similar overall: tarmac and car regions don't resemble each other, but both score well for "car park", so the car park is segmented as one area.
-8. The INSID3 in-context head segments grouped native-resolution crops (448 / 672 / 896 px). Downsampling is limited per query so reference-sized objects keep at least 8 DINOv3 patches. For text queries, the top results serve as the head's reference shots.
-
-### The pipeline
+## The pipeline
 
 Two buildings (blue outlines) on either side of an ingestion tile boundary, searched for with 5 labelled example buildings. Dashed black lines are the 448 px tiles.
 
@@ -34,13 +13,13 @@ Two buildings (blue outlines) on either side of an ingestion tile boundary, sear
 | ![Imagery](docs/images/pipeline_1_imagery.jpg) | ![DINOv3 patches](docs/images/pipeline_2_patches.jpg) |
 | **1. Imagery.** A 2 × 2 block of 448 px ingestion tiles. | **2. DINOv3 patches.** Each tile reaches DINOv3 at native resolution; every 16 px patch (28 × 28 per tile) gets its own feature vector. Colours only distinguish neighbouring patches. |
 | ![Per-tile clusters](docs/images/pipeline_3_clusters.jpg) | ![Pieces](docs/images/pipeline_4_pieces.jpg) |
-| **3. Per-tile clusters.** Similar-looking patches are clustered within each tile; nothing crosses a tile boundary yet. | **4. Pieces.** Each cluster is split into spatially connected pieces, each embedded from its own patches, so a building is no longer averaged with look-alikes elsewhere in the tile. |
+| **3. Per-tile clusters.** Patches are clustered within each tile (agglomerative, cosine); nothing crosses a tile boundary yet. | **4. Pieces.** Each cluster is split into spatially connected pieces, each embedded from its own patches, so a building is no longer averaged with look-alikes elsewhere in the tile. |
 | ![Regions](docs/images/pipeline_5_regions.jpg) | ![Segmentation](docs/images/pipeline_6_segmentation.jpg) |
-| **5. Regions.** Pieces are merged across tile boundaries into regions of at most 448 px. The region holding the buildings (red) spans two tiles and is indexed as one row. | **6. Retrieval and segmentation.** The region ranks #16 of about 9,600. The head segments the crop around it (dashed red) and returns a separate mask for each building (green), with IoU 0.73 and 0.85. |
+| **5. Regions.** Neighbouring pieces are merged across tile boundaries (greedy Ward agglomeration) into coherent regions of at most 448 px. The region holding the buildings (red) spans two tiles and is indexed as one row. | **6. Retrieval and segmentation.** The region ranks #16 of about 9,600. The head segments a native-resolution crop around it (dashed red) and returns a separate mask for each building (green), with IoU 0.73 and 0.85. |
 
-### Query merge
+## Query merge
 
-A large car park (blue outline) queried with the text prompt "car park". Dashed black lines are the 448 px ingestion tiles.
+Large objects span many regions that look nothing alike. Query merge, a segmentation-time step, joins neighbouring regions that are similar *for this query*: each hit scoring in the top 5% of the index grows into its neighbours that also score in the top 5%. Retrieval itself still ranks single regions. Below, a large car park (blue outline) is queried with the text prompt "car park"; dashed black lines are the 448 px ingestion tiles.
 
 | | |
 |---|---|
@@ -101,9 +80,9 @@ uv run unboxed-query --image $IMAGE --table regions --dino-weights $DINO \
     --references examples.geojson --label "swimming pool" --output-dir out/pools
 ```
 
-`unboxed-query` writes `results.geojson` (ranked hits with scores), `areas.geojson` (what was segmented, after query merge), `crops.geojson`, `masks.geojson` and `summary.json`. Use `--no-query-merge` to segment hits as retrieved.
+`unboxed-query` writes `results.geojson` (ranked hits with scores), `areas.geojson` (what was segmented, after query merge), `crops.geojson`, `masks.geojson` and `summary.json`. Use `--no-query-merge` to segment hits as retrieved. Text queries use their top 3 results as the head's reference shots (`--pseudo-refs`).
 
-All commands take `--db` (LanceDB directory, default `./lancedb`) and `--help`.
+All commands take `--db` (LanceDB directory, default `./lancedb`) and `--help`. DINOv3 outputs vary slightly with GPU batch size, so results are reproducible for a fixed `--batch-size`.
 
 ### Evaluation (with labelled polygons)
 
@@ -144,18 +123,6 @@ Region and tile tables share one schema:
 | `mask_geojson` | polygon (raster CRS) |
 
 Search is brute force (exact). For very large tables, add an ANN index on either vector column with LanceDB's `create_index`.
-
-## Design notes
-
-Choices kept after evaluation:
-- **Native resolution:** tiles reach DINOv3 at full resolution (no downsampling before 448 px).
-- **Pieces, not clusters:** splitting clusters into connected pieces keeps scattered look-alikes from sharing one embedding.
-- **Region cost 12.25, cap 448 px:** larger caps (896 px, or growth only for very uniform areas) did not keep large objects whole: their pieces split because they look different, not because of the cap.
-- **Per-tile clustering first:** partitioning raw patches across tiles (skipping per-tile clustering) helped some large objects but merged small distinctive ones (e.g. pools) into their surroundings.
-- **SkyCLIP context crops:** masking out everything outside the region, or cropping tightly to it, were worse overall.
-- **Query merge only at segmentation time:** merging inside the ranking, or using merged areas as reference shots, hurt small objects.
-
-**Reproducibility:** DINOv3 outputs vary slightly with GPU batch size, enough to move some cluster boundaries near the clustering threshold. Results are reproducible for a fixed `--batch-size`, but not across different ones.
 
 ## Licence
 
